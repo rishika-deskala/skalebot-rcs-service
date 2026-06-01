@@ -1,0 +1,38 @@
+name: Master Deploy (Beta)
+
+on:
+  push:
+    branches:
+      - master
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION }}
+  AWS_ECR_ACCOUNT_URL: ${{ vars.AWS_ECR_ACCOUNT_URL }}
+  IMAGE_NAME: ${{ vars.IMAGE_NAME }}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+      - run: npm ci
+      - run: npm test
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        run: aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $AWS_ECR_ACCOUNT_URL
+
+      - name: Build and Push Docker Image (beta)
+        run: |
+          docker build -t $IMAGE_NAME:beta .
+          docker tag $IMAGE_NAME:beta $AWS_ECR_ACCOUNT_URL/$IMAGE_NAME:beta
+          docker push $AWS_ECR_ACCOUNT_URL/$IMAGE_NAME:beta

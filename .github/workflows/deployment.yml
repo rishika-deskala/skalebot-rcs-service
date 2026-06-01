@@ -1,0 +1,52 @@
+name: Refresh ECR Secret & Restart Deployment
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: "Branch to run this workflow from"
+        required: true
+        default: master
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout selected branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.branch }}
+
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.vara_ec2_key }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H ${{ secrets.vara_ec2_host }} >> ~/.ssh/known_hosts
+
+      - name: SSH into EC2 and run MicroK8s commands
+        run: |
+          ssh ${{ secrets.EC2_USER }}@${{ secrets.vara_ec2_host }} << 'EOF'
+            set -e
+
+            echo "Deleting old ECR secret..."
+            microk8s kubectl delete secret ecr-registry-credentials \
+              -n app-services \
+              --ignore-not-found
+
+            echo "Creating new ECR secret..."
+            microk8s kubectl create secret docker-registry ecr-registry-credentials \
+              --docker-server=314029728553.dkr.ecr.ap-south-1.amazonaws.com \
+              --docker-username=AWS \
+              --docker-password=$(aws ecr get-login-password --region ap-south-1) \
+              --namespace app-services
+
+            echo "Restarting deployment..."
+            microk8s kubectl rollout restart deployment skalebot-wca-service \
+              -n app-services
+
+            echo "Waiting for rollout to complete..."
+            microk8s kubectl rollout status deployment skalebot-wca-service \
+              -n app-services
+          EOF
